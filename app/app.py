@@ -6,9 +6,15 @@ import json
 import os
 import re
 import sqlite3
+import sys
 import time
 import uuid
 from pathlib import Path
+
+# Make sibling modules (data/, model.py) importable no matter how the app is
+# launched: `python3 app/app.py` (script dir on sys.path) or
+# `gunicorn app.app:app` from the repo root (only the repo root is on sys.path).
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from flask import Flask, g, jsonify, redirect, render_template, request, session
 
