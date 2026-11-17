@@ -44,7 +44,13 @@
       ".deflectly-input input{flex:1;padding:10px 12px;border:1px solid #e2e2e0;border-radius:6px;font-size:14px;outline:none;}",
       ".deflectly-input button{background:"+primary+";color:#fff;border:none;border-radius:6px;padding:0 16px;font-size:14px;font-weight:700;cursor:pointer;}",
       ".deflectly-close{position:absolute;top:8px;right:8px;background:transparent;border:none;color:#fff;opacity:0.8;cursor:pointer;font-size:18px;}",
-      ".deflectly-typing{font-size:12px;color:#666;font-style:italic;}"
+      ".deflectly-typing{font-size:12px;color:#666;font-style:italic;}",
+      ".deflectly-fb{display:flex;gap:6px;margin-top:4px;font-size:11px;}",
+      ".deflectly-fb button{background:none;border:1px solid #d0d0d0;border-radius:4px;padding:1px 8px;cursor:pointer;font-size:11px;}",
+      ".deflectly-fb button:hover{border-color:#666;}",
+      ".deflectly-correct{display:flex;gap:6px;margin-top:4px;width:100%;}",
+      ".deflectly-correct input{flex:1;border:1px solid #d0d0d0;border-radius:4px;padding:4px 8px;font-size:12px;}",
+      ".deflectly-correct button{background:" + primary + ";color:#fff;border:none;border-radius:4px;padding:4px 10px;cursor:pointer;font-size:12px;}"
     ].join("\n");
     var style = document.createElement("style");
     style.textContent = css;
@@ -126,7 +132,13 @@
         .then(function (d) {
           setTyping(false);
           if (d.ok) {
-            addMsg(d.answer + "  <span class=\"meta\">confidence " + Math.round(d.score * 100) + "%</span>", "bot");
+            var div = document.createElement("div");
+            div.className = "deflectly-msg bot";
+            div.innerHTML = escapeHtml(d.answer) +
+              '  <span class="meta">confidence ' + Math.round(d.score * 100) + "%</span>";
+            attachFeedback(div, q, d.answer);
+            chat.appendChild(div);
+            chat.scrollTop = chat.scrollHeight;
           } else {
             addMsg("Sorry, I couldn't answer that. Try rephrasing or contact support.", "bot");
           }
@@ -137,8 +149,74 @@
         });
     }
 
+    function attachFeedback(div, question, answer) {
+      var fb = document.createElement("div");
+      fb.className = "deflectly-fb";
+      var up = document.createElement("button");
+      up.textContent = "👍";
+      var down = document.createElement("button");
+      down.textContent = "👎";
+      up.onclick = function () {
+        fb.remove();
+        fetch(feedbackUrl(), {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ question: question, predicted_answer: answer, verdict: "up" }),
+        });
+      };
+      down.onclick = function () { promptCorrection(div, question); fb.remove(); };
+      fb.appendChild(up);
+      fb.appendChild(down);
+      div.appendChild(fb);
+    }
+
+    function feedbackUrl() {
+      return endpoint.replace("/api/predict", "/api/feedback");
+    }
+
+    function promptCorrection(div, question) {
+      var row = document.createElement("div");
+      row.className = "deflectly-correct";
+      var input = document.createElement("input");
+      input.placeholder = "What's the correct answer?";
+      var btn = document.createElement("button");
+      btn.textContent = "Teach";
+      btn.onclick = function () {
+        var corrected = input.value.trim();
+        if (!corrected) return;
+        row.remove();
+        fetch(feedbackUrl(), {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            question: question,
+            predicted_answer: null,
+            corrected_answer: corrected,
+            verdict: "down",
+          }),
+        })
+          .then(function (r) { return r.json(); })
+          .then(function (d) {
+            var note = document.createElement("div");
+            note.className = "deflectly-msg bot";
+            note.innerHTML = d.ok
+              ? "Learned — retrain runs on the next sync."
+              : "Couldn't save that correction.";
+            chat.appendChild(note);
+            chat.scrollTop = chat.scrollHeight;
+          });
+      };
+      row.appendChild(input);
+      row.appendChild(btn);
+      chat.appendChild(row);
+      input.focus();
+      chat.scrollTop = chat.scrollHeight;
+    }
+
     send.addEventListener("click", ask);
-    input.addEventListener("keydown", function (e) { if (e.key === "Enter") ask(); });
+    input.addEventListener("keydown", function (e) {
+      if (e.key === "Enter") ask();
+    });
   }
 
   readConfig();

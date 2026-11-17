@@ -13,7 +13,7 @@ from pathlib import Path
 from flask import Flask, g, jsonify, redirect, render_template, request, session
 
 from data.sample_data import GENERIC_KB, SAMPLE_TICKETS, TEST_QUESTIONS
-from model import Responder, answer_match, rouge_l
+from model import Responder, _norm, answer_match, rouge_l
 
 BASE_DIR = Path(__file__).resolve().parent
 DB_PATH = BASE_DIR / "demo.db"
@@ -66,6 +66,16 @@ def init_db():
         CREATE TABLE IF NOT EXISTS captured_emails (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             email TEXT NOT NULL,
+            created_at REAL
+        );
+        CREATE TABLE IF NOT EXISTS feedback_events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            session_id TEXT,
+            question TEXT NOT NULL,
+            predicted_answer TEXT,
+            verdict TEXT NOT NULL,
+            corrected_answer TEXT,
+            retrained INTEGER DEFAULT 0,
             created_at REAL
         );
         """
@@ -427,7 +437,8 @@ def api_stats():
     c = db()
     s = c.execute("SELECT COUNT(*) n, SUM(trained) t, SUM(ticket_count) tickets FROM sessions").fetchone()
     i = c.execute("SELECT COUNT(*) n FROM conversion_intents").fetchone()
-    return jsonify(sessions=s["n"], trained=s["t"], tickets=s["tickets"], intents=i["n"])
+    fb = c.execute("SELECT COUNT(*) FROM feedback_events WHERE verdict='down'").fetchone()[0]
+    return jsonify(sessions=s["n"], trained=s["t"], tickets=s["tickets"], intents=i["n"], corrections=fb)
 
 
 @app.post("/api/predict")
@@ -452,6 +463,58 @@ def api_predict():
     answer, score, top3 = store.predict(q)
     return jsonify(ok=True, question=q, answer=answer, score=round(score, 3),
                    alternatives=[{"answer": a, "score": round(s, 3)} for a, s in top3[1:]])
+
+
+@app.post("/api/feedback")
+def api_feedback():
+    """The self-improving loop: capture a correction and retrain the store model.
+
+    Body: {question, verdict: 'up'|'down', corrected_answer?: str}
+    A thumbs-down with a corrected_answer appends the pair to the session's
+    ticket set and retrains immediately (TF-IDF trains in well under a
+    second), so the very next /api/predict serves the corrected answer.
+    """
+    sid = ensure_session()
+    st = state(sid)
+    data = request.json or {}
+    question = (data.get("question") or "").strip()
+    verdict = (data.get("verdict") or "").lower()
+    corrected = (data.get("corrected_answer") or "").strip()
+    predicted = (data.get("predicted_answer") or "").strip()
+    if not question:
+        return jsonify(ok=False, error="question required"), 400
+    if verdict not in ("up", "down"):
+        return jsonify(ok=False, error="verdict must be 'up' or 'down'"), 400
+
+    retrained = 0
+    if verdict == "down" and corrected:
+        if not st.get("tickets"):
+            return jsonify(ok=False, error="No tickets loaded; run the demo first"), 400
+        # avoid duplicate training rows for the same question text
+        st["tickets"] = [(q, a) for q, a in st["tickets"] if _norm(q) != _norm(question)]
+        st["tickets"].append((question, corrected))
+        qs = [q for q, a in st["tickets"]]
+        ans = [a for q, a in st["tickets"]]
+        st["store_model"] = Responder("store", qs, ans)
+        try:
+            st["store_model"].save(MODEL_DIR / f"{sid}.pkl")
+            retrained = 1
+        except Exception:
+            retrained = 0
+        # immediate proof the correction took
+        answer, score, _ = st["store_model"].predict(question)
+
+    db().execute(
+        "INSERT INTO feedback_events (session_id, question, predicted_answer, verdict,"
+        " corrected_answer, retrained, created_at) VALUES (?,?,?,?,?,?,?)",
+        (sid, question, predicted, verdict, corrected or None, retrained, time.time()),
+    )
+    db().commit()
+    out = {"ok": True, "verdict": verdict}
+    if retrained:
+        out.update(retrained=True, ticket_count=len(st["tickets"]),
+                   corrected_answer=answer, corrected_score=round(score, 3))
+    return jsonify(out)
 
 
 @app.get("/api/healthz")

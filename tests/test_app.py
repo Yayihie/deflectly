@@ -74,6 +74,45 @@ def test_predict_endpoint():
     assert d["answer"] is not None
 
 
+def test_feedback_loop_retrains():
+    """Thumbs-down with a correction retrains the model so predict serves it."""
+    client = deflectly_app.app.test_client()
+    client.post("/api/sample")
+    import app as A
+    pairs = [{"question": q, "answer": a} for q, a in A.SAMPLE_TICKETS]
+    client.post("/api/review", json={"pairs": pairs})
+    client.post("/api/train").get_data(as_text=True)
+
+    # validation errors
+    assert client.post("/api/feedback", json={}).status_code == 400
+    assert client.post("/api/feedback", json={"question": "x", "verdict": "sideways"}).status_code == 400
+
+    # ask a question the store corpus can't answer well
+    r = client.post("/api/predict", json={"question": "do you ship to the moon overnight?"})
+    d = r.get_json()
+
+    # correct it with a brand-new answer
+    r = client.post(
+        "/api/feedback",
+        json={"question": "do you ship to the moon overnight?",
+              "predicted_answer": d.get("answer"), "verdict": "down",
+              "corrected_answer": "We ship to the moon overnight for $20."},
+    )
+    assert r.status_code == 200
+    d2 = r.get_json()
+    assert d2["ok"] is True
+    assert d2["retrained"] is True
+    assert d2["ticket_count"] == len(pairs) + 1
+
+    # the retrained model now serves the corrected answer
+    r = client.post("/api/predict", json={"question": "do you ship to the moon overnight?"})
+    assert "moon" in r.get_json()["answer"].lower()
+
+    # stats count the correction
+    r = client.get("/api/stats")
+    assert r.get_json()["corrections"] >= 1
+
+
 def test_healthz():
     client = deflectly_app.app.test_client()
     r = client.get("/api/healthz")
