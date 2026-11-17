@@ -113,6 +113,20 @@ def test_feedback_loop_retrains():
     assert r.get_json()["corrections"] >= 1
 
 
+def test_teach_page_gate_and_render():
+    """Teach page redirects without a trained model, renders with one."""
+    client = deflectly_app.app.test_client()
+    assert client.get("/teach").status_code == 302
+
+    client.post("/api/sample")
+    import app as A
+    client.post("/api/review", json={"pairs": [{"question": q, "answer": a} for q, a in A.SAMPLE_TICKETS]})
+    client.post("/api/train").get_data(as_text=True)
+    r = client.get("/teach")
+    assert r.status_code == 200
+    assert b"Teach it" in r.data
+
+
 def test_healthz():
     client = deflectly_app.app.test_client()
     r = client.get("/api/healthz")

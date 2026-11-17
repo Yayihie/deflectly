@@ -192,8 +192,25 @@ def step3_page():
     return render_template("step3.html", count=len(st["tickets"]), sid=sid)
 
 
+@app.get("/teach")
+def teach_page():
+    """Step 5: correct the model live and watch confidence flip."""
+    sid = ensure_session()
+    st = state(sid)
+    if st.get("store_model") is None:
+        pkl = MODEL_DIR / f"{sid}.pkl"
+        if pkl.exists():
+            try:
+                st["store_model"] = Responder.load(pkl)
+            except Exception:
+                pass
+    if st.get("store_model") is None:
+        return redirect("/train")
+    return render_template("teach.html", count=len(st.get("tickets") or []))
+
+
 @app.get("/pricing")
-def step4_page():
+def step5_page():
     ensure_session()
     return render_template("step4.html")
 

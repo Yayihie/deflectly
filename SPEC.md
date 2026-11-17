@@ -97,6 +97,7 @@ All plans: nightly retrain from new tickets, eval gate before deploy, one-click 
 - In-session training (retrieval model) with streamed progress log
 - Baseline-vs-store-model holdout comparison with real scores
 - Shopify widget (chat bubble) answering from trained model; human handoff on low confidence
+- **Live correction loop (shipped)**: thumbs 👍/👎 on every widget answer; a 👎 with a corrected answer retrains the store model in <1s and the next ask is served the correction. Demo step 5 (`/teach`) makes the loop visible with before/after confidence on the same question.
 - SQLite → Postgres; single-store; nightly retrain cron; eval report email
 - Gorgias CSV export import
 
@@ -111,13 +112,24 @@ All plans: nightly retrain from new tickets, eval gate before deploy, one-click 
 
 - **Hallucination on store policies** — mitigations: retrieval-grounded answers only (demo never free-generates), confidence threshold + handoff, eval gate before deploy.
 - **Dirty training data** (agents' inconsistent past answers) — review step + eval gate; low-quality corpora just score low and the owner sees it.
-- **"Trained model" skepticism** — owners may not believe a seconds-long model is real. Counter: show raw scores, let them paste their own test question live (planned).
+- **"Trained model" skepticism** — owners may not believe a seconds-long model is real. Counter: show raw scores, and the `/teach` step lets them paste their own test question live, mark it wrong, and watch confidence move on the spot (shipped).
 - **Gorgias/Zendesk ship their own AI** and bundle it — counter: ours is trained on *their* answers and they can eval it before paying; platform AI is generic.
 - **Retrieval-model ceiling**: TF-IDF ranks well on templated support Q/A but plateaus on paraphrase-heavy corpora; the SFT adapter (V2) is the answer, and the eval harness already measures whether the upgrade actually wins.
 - **Privacy** — ticket exports contain customer PII; V1 needs scrubbing at the review step, and the demo's paste-your-own-data flow sets the right expectation of per-store isolation.
 - **Churn if deflection doesn't move** — the eval report makes progress (or stagnation) visible monthly; honest metrics keep trust even when the number is flat.
 
-## 10. Verified demo results (real run, 2026-11-17)
+## 10. Correction loop — verified live (2026-11-17)
+
+Same question, before and after one agent correction (live server, `/teach` route):
+
+| Stage | Answer served | Confidence |
+|---|---|---|
+| Before correction | "…qualified nonprofits receive 25% off any paid plan…" | 43% |
+| After one correction | "Yes - nonprofits get 30% off every plan…" | 86% |
+
+Retrain time on correction: <1s (retrieval index rebuild, 57 pairs). No LLM, no API key — the loop is pure retrieval over the store's own tickets, so it runs at zero marginal cost per correction.
+
+## 11. Verified demo results (real run, 2026-11-17)
 
 Sample store (60 pairs), 5 held-out questions, port 8451:
 

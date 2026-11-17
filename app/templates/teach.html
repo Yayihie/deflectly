@@ -1,0 +1,96 @@
+{% extends "base.html" %}
+{% set step = 5 %}
+{% block title %}Teach it live{% endblock %}
+{% block body %}
+<p class="steps">Step 1 · Tickets → Step 2 · Review → Step 3 · Train → Step 4 · Compare → <b>Step 5 of 6</b> — Teach it → Go live</p>
+<h1>Correct it once. Watch it get it right.</h1>
+<p class="sub">This is the whole product. Ask something your help center never covered, mark it wrong, type the right answer — the model retrains in under a second and answers correctly on the next ask.</p>
+
+<div class="panel">
+  <label class="note" for="q" style="display:block; margin-bottom:6px;">Ask a question your docs don't cover</label>
+  <div style="display:flex; gap:8px;">
+    <input id="q" type="text" autocomplete="off" placeholder="e.g. do you offer a nonprofit discount?" style="flex:1; padding:10px 12px; border:1px solid var(--line); border-radius:5px; font-size:15px;">
+    <button id="ask">Ask</button>
+  </div>
+  <p class="note" style="margin-bottom:0;">No API key, no LLM — this is retrieval over your tickets. It learns the moment you correct it.</p>
+</div>
+
+<div id="round" class="panel" style="display:none; margin-top:16px;">
+  <table>
+    <tr><th style="width:110px;">Attempt</th><th>Answer</th><th style="width:110px;">Confidence</th></tr>
+    <tr id="r1"><td><b>Before</b></td><td id="a1">–</td><td id="s1" class="score">–</td></tr>
+    <tr id="r2" style="display:none;"><td><b>After</b></td><td id="a2">–</td><td id="s2" class="score">–</td></tr>
+  </table>
+
+  <div id="fb" style="margin-top:14px; display:none;">
+    <p class="note" style="margin:0 0 8px;">Wrong? Tell it what the answer should be:</p>
+    <div style="display:flex; gap:8px;">
+      <input id="correction" type="text" autocomplete="off" placeholder="The correct answer" style="flex:1; padding:10px 12px; border:1px solid var(--line); border-radius:5px; font-size:15px;">
+      <button id="teach" class="ghost">Teach it</button>
+    </div>
+  </div>
+
+  <div id="verdict" class="flash" style="display:none; margin:16px 0 0;"></div>
+</div>
+
+<div style="margin-top:24px; text-align:right;">
+  <a href="/pricing" class="btn" id="next" style="visibility:hidden;">Get this live on your product →</a>
+</div>
+
+<script>
+const qEl = document.getElementById('q'), askBtn = document.getElementById('ask');
+let current = null;
+function esc(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+function cls(x) { return x >= 0.5 ? 'good' : (x >= 0.2 ? 'mid' : 'bad'); }
+
+askBtn.onclick = async () => {
+  const q = qEl.value.trim();
+  if (!q) return;
+  askBtn.disabled = true;
+  const d = await (await fetch('/api/predict', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({question: q})})).json();
+  askBtn.disabled = false;
+  if (!d.ok) { alert(d.error || 'No trained model yet — finish the demo first.'); return; }
+  current = {q, answer: d.answer, score: d.score};
+  document.getElementById('round').style.display = 'block';
+  document.getElementById('r2').style.display = 'none';
+  document.getElementById('verdict').style.display = 'none';
+  document.getElementById('next').style.visibility = 'hidden';
+  document.getElementById('a1').innerHTML = esc(d.answer);
+  const s1 = document.getElementById('s1');
+  s1.textContent = Math.round(d.score * 100) + '%';
+  s1.className = 'score ' + cls(d.score);
+  document.getElementById('fb').style.display = 'block';
+  document.getElementById('correction').value = '';
+  document.getElementById('correction').focus();
+};
+
+document.getElementById('teach').onclick = async () => {
+  const corrected = document.getElementById('correction').value.trim();
+  if (!corrected || !current) return;
+  const btn = document.getElementById('teach');
+  btn.disabled = true;
+  const d = await (await fetch('/api/feedback', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({
+    question: current.q, predicted_answer: current.answer, verdict: 'down', corrected_answer: corrected
+  })})).json();
+  btn.disabled = false;
+  if (!d.ok) { alert(d.error || 'Could not save that correction.'); return; }
+
+  // re-ask the same question against the retrained model
+  const after = await (await fetch('/api/predict', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({question: current.q})})).json();
+  document.getElementById('r2').style.display = 'table-row';
+  document.getElementById('a2').innerHTML = esc(after.answer);
+  const s2 = document.getElementById('s2');
+  s2.textContent = Math.round(after.score * 100) + '%';
+  s2.className = 'score ' + cls(after.score);
+
+  const v = document.getElementById('verdict');
+  v.style.display = 'block';
+  v.innerHTML = 'Taught in ' + (d.ticket_count) + ' tickets. Confidence went from <b>' +
+    Math.round(current.score * 100) + '%</b> to <b class="good">' + Math.round(after.score * 100) + '%</b> on the same question. ' +
+    'In production this happens automatically every time an agent corrects a reply.';
+  document.getElementById('next').style.visibility = 'visible';
+};
+
+qEl.addEventListener('keydown', e => { if (e.key === 'Enter') askBtn.click(); });
+</script>
+{% endblock %}
