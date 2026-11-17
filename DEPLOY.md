@@ -28,6 +28,16 @@ Avoid `.xyz`/`.store`/`.shop` if you plan to hold the name: their renewals are 1
 > Prices are third-party tracker snapshots (Porkbun API, tldbee, nextname) from 2026-11-17;
 > confirm at checkout. Registrar sites block automated checks (Cloudflare Turnstile).
 
+## Live (deployed 2026-11-17)
+
+- URL: **https://deflectly-production.up.railway.app** (Railway project `deflectly`, workspace yayihie's Projects)
+- Deployed via `railway up` from this directory; `$PORT` injected and honored.
+- Verified on the public URL: `/`, `/demo`, `/widget`, `/pricing`, `/teach` → 200; healthz OK;
+  sample→review→train→compare gives baseline 0.0 vs store 1.0; correction loop retrains and
+  serves the corrected answer; `/api/stats` counts corrections.
+- Redeploy: `railway up --ci` from this directory.
+- Custom domain later: `railway domain` (add your own) then point registrar DNS at it.
+
 ## Run locally
 
 ```sh

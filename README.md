@@ -1,5 +1,7 @@
 # Deflectly
 
+Live demo: https://deflectly-production.up.railway.app (Railway, free subdomain — custom domain pending)
+
 Self-improving support-desk AI for B2B SaaS products.
 
 Paste your product's past support Q/A tickets, watch a model train on *your* data in seconds,
