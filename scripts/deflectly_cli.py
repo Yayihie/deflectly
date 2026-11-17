@@ -147,6 +147,13 @@ def load_corpus(path=DEFAULT_CORPUS):
     return pairs
 
 
+def load_model_or_explain(path):
+    """Responder.load raises FileNotFoundError; the CLI should say what to run instead."""
+    if not Path(path).exists():
+        raise SystemExit(f"no model at {path} — run `deflectly train <file>` first")
+    return Responder.load(path)
+
+
 def build(pairs):
     t0 = time.time()
     model = Responder("cli", [q for q, _ in pairs], [a for _, a in pairs])
@@ -180,7 +187,7 @@ def cmd_train(args):
 
 
 def cmd_ask(args):
-    model = Responder.load(args.model)
+    model = load_model_or_explain(args.model)
     answer, score, _ = model.predict(args.question)
     if args.json:
         print(json.dumps({"question": args.question, "answer": answer, "confidence": round(score, 4)}))
@@ -194,7 +201,7 @@ def cmd_ask(args):
 
 
 def cmd_teach(args):
-    model = Responder.load(args.model)
+    model = load_model_or_explain(args.model)
     before, before_score, _ = model.predict(args.question)
     pairs = load_corpus(args.corpus)
     pairs = [(q, a) for q, a in pairs if q != args.question] + [(args.question, args.answer)]
@@ -213,7 +220,7 @@ def cmd_stats(args):
     words = sum(len(a.split()) for _, a in pairs)
     print(f"corpus:  {len(pairs)} pairs   unique questions: {len(qs)}")
     print(f"answers: {words:,} words, {words/len(pairs):.0f} avg")
-    model = Responder.load(args.model)
+    model = load_model_or_explain(args.model)
     vocab = sum(len(getattr(v, "vocabulary_", {})) for v in (model._wq_vec, model._wa_vec, model._ch_vec))
     print(f"model:   {vocab:,} TF-IDF features across 3 channels")
 
