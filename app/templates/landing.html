@@ -62,11 +62,12 @@
       </div>
     </div>
     <div style="flex:1; min-width:280px;">
-      <div class="mock">
-        <strong>Demo preview</strong> — paste tickets → train → compare:<br>
-        Generic bot: 0/5 correct &nbsp;|&nbsp; Your model: 5/5 correct<br>
-        <span class="note">Add a real screenshot here (running demo at /demo).</span>
-      </div>
+      <a href="/demo" style="display:block;">
+        <img src="/static/demo-compare.png"
+             alt="Deflectly demo comparison: a generic bot scores 0/5 on held-out product questions, the model trained on your tickets scores 5/5"
+             style="width:100%; max-height:400px; object-fit:cover; object-position:top; border:1px solid var(--line); border-radius:6px; display:block;">
+      </a>
+      <p class="note" style="margin:8px 0 0;">Real run, built-in sample store: generic bot <b>0/5 correct</b> · your model <b>5/5</b>. <a href="/demo">Run it yourself →</a></p>
     </div>
   </div>
 </section>

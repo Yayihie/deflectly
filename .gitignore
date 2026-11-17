@@ -8,3 +8,6 @@ demo.db
 .DS_Store
 .coverage
 pytest_cache/
+.session_key
+app/models/
+*.pkl

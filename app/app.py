@@ -26,7 +26,55 @@ DB_PATH = BASE_DIR / "demo.db"
 MODEL_DIR = BASE_DIR / "models"
 MODEL_DIR.mkdir(parents=True, exist_ok=True)
 app = Flask(__name__)
-app.secret_key = "deflectly-demo-key-not-for-production"
+
+
+def _load_secret_key():
+    """Session secret resolution that stays correct with multiple workers.
+
+    Order: SECRET_KEY env var → a persisted random key file → (last resort) a random
+    key. A per-process random key would be wrong here: gunicorn workers must share the
+    secret, or a cookie signed by one worker is rejected by the next and every request
+    starts a fresh session. A hardcoded key is worse — anyone could forge a session.
+
+    The key file is created with O_EXCL so that workers booting simultaneously can't
+    each generate their own (that race produced two different secrets in one process
+    pool, which invalidated cookies on every worker switch).
+    """
+    env = os.environ.get("SECRET_KEY")
+    if env:
+        return env
+    key_file = BASE_DIR / ".session_key"
+
+    def _read_key():
+        for _ in range(50):  # the winner may still be writing; give it ~1s
+            try:
+                stored = key_file.read_text().strip()
+            except FileNotFoundError:
+                return ""  # nobody created it yet — caller will create it
+            except Exception:
+                return ""
+            if stored:
+                return stored
+            time.sleep(0.02)
+        return ""
+
+    stored = _read_key()
+    if stored:
+        return stored
+    generated = uuid.uuid4().hex
+    try:
+        fd = os.open(str(key_file), os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+        with os.fdopen(fd, "w") as fh:
+            fh.write(generated)
+        return generated
+    except FileExistsError:
+        # another worker won the race — use its key
+        return _read_key() or generated
+    except Exception:
+        return generated
+
+
+app.secret_key = _load_secret_key()
 
 MAX_TICKETS = 400  # pasted-pair cap for the demo
 
@@ -86,6 +134,14 @@ def init_db():
         );
         """
     )
+    # Migration: tickets + reviewed must survive across gunicorn workers and restarts.
+    # In-memory state is per-process, so with >1 worker a request can land on a
+    # worker that has never seen this session's tickets. Keep the source of truth in SQLite.
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(sessions)")}
+    if "tickets" not in cols:
+        conn.execute("ALTER TABLE sessions ADD COLUMN tickets TEXT")
+    if "reviewed" not in cols:
+        conn.execute("ALTER TABLE sessions ADD COLUMN reviewed INTEGER DEFAULT 0")
     conn.commit()
     conn.close()
 
@@ -100,20 +156,71 @@ def ensure_session():
     return sid
 
 
-# ---------------------------------------------------------------- in-memory model cache
-STATE = {}  # sid -> {"tickets": [(q,a)...], "store_model": Responder|None}
+# ------------------------------------------- session state / model cache
+# tickets + reviewed are ALWAYS read from SQLite (source of truth across workers).
+# Only the trained model is cached in memory — it is also persisted as <sid>.pkl,
+# so any worker can rebuild it on demand.
+STATE = {}  # sid -> {"store_model": Responder|None}
+_BASELINE = {}
 
 
 def state(sid):
-    return STATE.setdefault(sid, {"tickets": [], "store_model": None})
+    """Return this session's state with tickets/reviewed read fresh from SQLite.
+
+    In-memory tickets would go stale: with N gunicorn workers, worker B never
+    sees the write worker A made, so /api/train would reject an approved set.
+    """
+    st = STATE.setdefault(sid, {"store_model": None})
+    tickets, reviewed = [], False
+    try:
+        row = db().execute("SELECT tickets, reviewed FROM sessions WHERE id=?", (sid,)).fetchone()
+        if row is not None:
+            if row["tickets"]:
+                tickets = [(q, a) for q, a in json.loads(row["tickets"])]
+            reviewed = bool(row["reviewed"])
+    except Exception as exc:  # a failed read must be visible, not silently empty
+        app.logger.error("state read failed for %s: %r", sid, exc)
+    st["tickets"] = tickets
+    st["reviewed"] = reviewed
+    return st
+
+
+def persist_tickets(sid, tickets, reviewed):
+    """Write the ticket set through to SQLite so every worker sees it."""
+    payload = json.dumps([[q, a] for q, a in tickets])
+    st = STATE.setdefault(sid, {"store_model": None})
+    st["tickets"] = list(tickets)
+    st["reviewed"] = bool(reviewed)
+    ok = False
+    try:
+        db().execute(
+            "UPDATE sessions SET tickets=?, reviewed=?, ticket_count=? WHERE id=?",
+            (payload, 1 if reviewed else 0, len(tickets), sid),
+        )
+        db().commit()
+        ok = True
+    except Exception as exc:
+        app.logger.error("persist_tickets failed for %s: %r", sid, exc)
+    if not ok:  # one retry on a fresh connection, then surface the failure
+        conn = sqlite3.connect(DB_PATH, timeout=10)
+        try:
+            conn.execute(
+                "UPDATE sessions SET tickets=?, reviewed=?, ticket_count=? WHERE id=?",
+                (payload, 1 if reviewed else 0, len(tickets), sid),
+            )
+            conn.commit()
+            app.logger.warning("persist_tickets recovered on retry for %s", sid)
+        finally:
+            conn.close()
+    return st
 
 
 def get_baseline():
-    if "baseline" not in STATE:
-        STATE["baseline"] = Responder(
+    if "model" not in _BASELINE:
+        _BASELINE["model"] = Responder(
             "baseline", [q for q, a in GENERIC_KB], [a for q, a in GENERIC_KB]
         )
-    return STATE["baseline"]
+    return _BASELINE["model"]
 
 
 def parse_pairs(raw: str):
@@ -166,6 +273,40 @@ def has_pii(pairs):
     return any(f["pii"] for f in flag_pii(pairs))
 
 
+def load_store_model(sid, st=None):
+    """Return this session's trained model, loading it from disk if this worker
+    doesn't hold it in memory.
+
+    With multiple gunicorn workers, training happens in one process. Any later
+    request (page or API) may land on a worker with an empty cache, so every
+    reader must be able to rebuild the model from <sid>.pkl.
+    """
+    st = st if st is not None else state(sid)
+    model = st.get("store_model")
+    if model is not None:
+        return model
+    pkl = MODEL_DIR / f"{sid}.pkl"
+    if pkl.exists():
+        try:
+            model = Responder.load(pkl)
+            st["store_model"] = model
+            return model
+        except Exception as exc:
+            app.logger.error("model load failed for %s: %r", sid, exc)
+    return None
+
+
+def prune_models(keep=200):
+    """Each session trains its own model (~430 KB). Keep the newest N and drop
+    the rest so a long-lived container can't fill its disk."""
+    try:
+        files = sorted(MODEL_DIR.glob("*.pkl"), key=lambda p: p.stat().st_mtime, reverse=True)
+        for old in files[keep:]:
+            old.unlink(missing_ok=True)
+    except Exception as exc:
+        app.logger.error("prune_models failed: %r", exc)
+
+
 # ---------------------------------------------------------------- routes: pages
 @app.get("/demo")
 def step1_page():
@@ -193,7 +334,7 @@ def step2_page():
 def step3_page():
     sid = ensure_session()
     st = state(sid)
-    if st.get("store_model") is None:
+    if load_store_model(sid, st) is None:
         return redirect("/train")
     return render_template("step3.html", count=len(st["tickets"]), sid=sid)
 
@@ -203,14 +344,7 @@ def teach_page():
     """Step 5: correct the model live and watch confidence flip."""
     sid = ensure_session()
     st = state(sid)
-    if st.get("store_model") is None:
-        pkl = MODEL_DIR / f"{sid}.pkl"
-        if pkl.exists():
-            try:
-                st["store_model"] = Responder.load(pkl)
-            except Exception:
-                pass
-    if st.get("store_model") is None:
+    if load_store_model(sid, st) is None:
         return redirect("/train")
     return render_template("teach.html", count=len(st.get("tickets") or []))
 
@@ -234,10 +368,9 @@ def api_tickets():
     pairs = parse_pairs(raw)
     if not pairs:
         return jsonify(ok=False, error="No Q/A pairs found. Use 'Q: ...' and 'A: ...' lines, or tab-separated pairs."), 400
-    st["tickets"] = pairs
+    st = persist_tickets(sid, pairs, False)
     st["store_model"] = None  # invalidate any previously trained model
-    st["reviewed"] = False  # owner must review/scrub before training
-    db().execute("UPDATE sessions SET ticket_count=?, source='paste' WHERE id=?", (len(pairs), sid))
+    db().execute("UPDATE sessions SET source='paste' WHERE id=?", (sid,))
     db().commit()
     return jsonify(ok=True, count=len(pairs), reviewed=False, pii=has_pii(pairs))
 
@@ -246,10 +379,9 @@ def api_tickets():
 def api_sample():
     sid = ensure_session()
     st = state(sid)
-    st["tickets"] = list(SAMPLE_TICKETS)
+    st = persist_tickets(sid, list(SAMPLE_TICKETS), False)
     st["store_model"] = None
-    st["reviewed"] = False
-    db().execute("UPDATE sessions SET ticket_count=?, source='sample' WHERE id=?", (len(SAMPLE_TICKETS), sid))
+    db().execute("UPDATE sessions SET source='sample' WHERE id=?", (sid,))
     db().commit()
     return jsonify(ok=True, count=len(SAMPLE_TICKETS), reviewed=False, pii=has_pii(SAMPLE_TICKETS))
 
@@ -264,10 +396,9 @@ def api_upload():
     pairs = parse_pairs(f.read().decode("utf-8", "replace"))
     if not pairs:
         return jsonify(ok=False, error="No Q/A pairs found in file."), 400
-    st["tickets"] = pairs
+    st = persist_tickets(sid, pairs, False)
     st["store_model"] = None
-    st["reviewed"] = False
-    db().execute("UPDATE sessions SET ticket_count=?, source='upload' WHERE id=?", (len(pairs), sid))
+    db().execute("UPDATE sessions SET source='upload' WHERE id=?", (sid,))
     db().commit()
     return jsonify(ok=True, count=len(pairs), reviewed=False, pii=has_pii(pairs))
 
@@ -303,10 +434,9 @@ def api_review():
             cleaned.append((q, a))
     if not cleaned:
         return jsonify(ok=False, error="No valid Q/A pairs after cleaning"), 400
-    st["tickets"] = cleaned
+    st = persist_tickets(sid, cleaned, True)
     st["store_model"] = None  # retrain from the reviewed set
-    st["reviewed"] = True
-    db().execute("UPDATE sessions SET ticket_count=?, source='reviewed' WHERE id=?", (len(cleaned), sid))
+    db().execute("UPDATE sessions SET source='reviewed' WHERE id=?", (sid,))
     db().commit()
     return jsonify(ok=True, count=len(cleaned), reviewed=True, pii=has_pii(cleaned))
 
@@ -339,11 +469,12 @@ def api_train():
         yield f"data: {json.dumps({'line': 'Building channel 3/3: character 3-5gram fuzzy matcher (typos, phrasing)'})}\n\n"
         yield f"data: {json.dumps({'line': 'Fusing channels with learned score weights'})}\n\n"
         st["store_model"] = m
-        # persist trained model to disk so it survives a server restart
+        # persist trained model to disk so any worker (or a restart) can reload it
         try:
             m.save(MODEL_DIR / f"{sid}.pkl")
-        except Exception:
-            pass
+            prune_models()
+        except Exception as exc:
+            app.logger.error("model save failed for %s: %r", sid, exc)
         dt = time.time() - t0
         vocab = sum(len(getattr(v, "vocabulary_", {})) for v in (m._wq_vec, m._wa_vec, m._ch_vec))
         yield f"data: {json.dumps({'line': f'Indexing {vocab:,} features across {len(qs)} tickets'})}\n\n"
@@ -366,16 +497,7 @@ def api_train():
 def api_compare():
     sid = ensure_session()
     st = state(sid)
-    store = st.get("store_model")
-    if store is None:
-        # try loading a previously persisted model for this session
-        pkl = MODEL_DIR / f"{sid}.pkl"
-        if pkl.exists():
-            try:
-                store = Responder.load(pkl)
-                st["store_model"] = store
-            except Exception:
-                store = None
+    store = load_store_model(sid, st)
     if store is None:
         return jsonify(ok=False, error="Train first"), 400
     base = get_baseline()
@@ -469,15 +591,7 @@ def api_predict():
     """Serve an answer from the trained store model (the live widget endpoint)."""
     sid = ensure_session()
     st = state(sid)
-    store = st.get("store_model")
-    if store is None:
-        pkl = MODEL_DIR / f"{sid}.pkl"
-        if pkl.exists():
-            try:
-                store = Responder.load(pkl)
-                st["store_model"] = store
-            except Exception:
-                store = None
+    store = load_store_model(sid, st)
     if store is None:
         return jsonify(ok=False, error="No trained model"), 400
     q = (request.json or {}).get("question", "").strip() if request.is_json else ""
@@ -514,15 +628,18 @@ def api_feedback():
         if not st.get("tickets"):
             return jsonify(ok=False, error="No tickets loaded; run the demo first"), 400
         # avoid duplicate training rows for the same question text
-        st["tickets"] = [(q, a) for q, a in st["tickets"] if _norm(q) != _norm(question)]
-        st["tickets"].append((question, corrected))
+        merged = [(q, a) for q, a in st["tickets"] if _norm(q) != _norm(question)]
+        merged.append((question, corrected))
+        st = persist_tickets(sid, merged, st.get("reviewed", True))
         qs = [q for q, a in st["tickets"]]
         ans = [a for q, a in st["tickets"]]
         st["store_model"] = Responder("store", qs, ans)
         try:
             st["store_model"].save(MODEL_DIR / f"{sid}.pkl")
+            prune_models()
             retrained = 1
-        except Exception:
+        except Exception as exc:
+            app.logger.error("retrain save failed for %s: %r", sid, exc)
             retrained = 0
         # immediate proof the correction took
         answer, score, _ = st["store_model"].predict(question)
@@ -579,10 +696,9 @@ def api_import():
         pairs = parse_pairs(raw)
     if not pairs:
         return jsonify(ok=False, error="No Q/A pairs found in import"), 400
-    st["tickets"] = pairs
+    st = persist_tickets(sid, pairs, False)
     st["store_model"] = None
-    st["reviewed"] = False
-    db().execute("UPDATE sessions SET ticket_count=?, source='import' WHERE id=?", (len(pairs), sid))
+    db().execute("UPDATE sessions SET source='import' WHERE id=?", (sid,))
     db().commit()
     return jsonify(ok=True, count=len(pairs), reviewed=False, pii=has_pii(pairs), source="import")
 

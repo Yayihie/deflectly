@@ -127,6 +127,91 @@ def test_teach_page_gate_and_render():
     assert b"Teach it" in r.data
 
 
+def test_state_survives_worker_switch():
+    """Regression: with >1 gunicorn worker, in-memory STATE is per-process.
+
+    A request can land on a worker that never saw this session's tickets. State
+    must hydrate from SQLite, otherwise /api/review 400s with 'No tickets loaded'
+    (observed in production on Railway with --workers 2).
+    """
+    client = deflectly_app.app.test_client()
+    r = client.post("/api/sample")
+    assert r.status_code == 200
+
+    # Simulate the next request hitting a different worker: drop all process-local state.
+    deflectly_app.STATE.clear()
+
+    pairs = [{"question": q, "answer": a} for q, a in deflectly_app.SAMPLE_TICKETS]
+    r = client.post("/api/review", json={"pairs": pairs})
+    assert r.status_code == 200, r.get_json()
+    assert r.get_json()["reviewed"] is True
+
+    deflectly_app.STATE.clear()  # again: new worker must still be able to train
+    r = client.post("/api/train")
+    assert r.status_code == 200
+    assert "Model trained" in r.get_data(as_text=True)
+
+    deflectly_app.STATE.clear()  # and the correction loop must still work
+    r = client.post("/api/predict", json={"question": "how long is the free trial?"})
+    assert r.status_code == 200
+    r = client.post("/api/feedback", json={
+        "question": "how long is the free trial?", "verdict": "down",
+        "corrected_answer": "The free trial runs 21 days.",
+    })
+    assert r.status_code == 200 and r.get_json()["retrained"] is True
+
+
+def test_review_then_train_survives_stale_cache():
+    """Regression: worker B cached state while reviewed was still False.
+
+    Observed in production (Railway, --workers 2): /api/review succeeded on one
+    worker, /api/train hit the other and 400'd with 'Review and approve your
+    tickets before training'. tickets/reviewed must be read fresh from SQLite,
+    not from a process-local cache — simulate two workers with two caches.
+    """
+    client = deflectly_app.app.test_client()
+    original = deflectly_app.STATE
+    cacheA, cacheB = {}, {}
+    try:
+        # Worker A handles the sample load.
+        deflectly_app.STATE = cacheA
+        assert client.post("/api/sample").status_code == 200
+
+        # Worker B handles the review (its own cache, then back to A).
+        deflectly_app.STATE = cacheB
+        pairs = [{"question": q, "answer": a} for q, a in deflectly_app.SAMPLE_TICKETS]
+        assert client.post("/api/review", json={"pairs": pairs}).status_code == 200
+
+        # Worker A is back for /api/train with the cache it built before review.
+        deflectly_app.STATE = cacheA
+        r = client.post("/api/train")
+        assert r.status_code == 200, f"stale cache broke training: {r.get_json()}"
+        assert "Model trained" in r.get_data(as_text=True)
+    finally:
+        deflectly_app.STATE = original
+
+
+def test_compare_page_reloads_model_on_other_worker():
+    """Regression: /compare (page) must rebuild the model from disk on a worker
+    that never trained it. Observed on Railway: the page 302'd to /train even
+    though the session had a trained model, so the demo looked broken."""
+    client = deflectly_app.app.test_client()
+    client.post("/api/sample")
+    pairs = [{"question": q, "answer": a} for q, a in deflectly_app.SAMPLE_TICKETS]
+    client.post("/api/review", json={"pairs": pairs})
+    client.post("/api/train").get_data(as_text=True)
+
+    # A different worker: no in-memory model for this session.
+    deflectly_app.STATE.clear()
+
+    r = client.get("/compare")
+    assert r.status_code == 200, f"compare page did not reload the model: {r.status_code}"
+
+    # and the API path too
+    r = client.post("/api/compare")
+    assert r.status_code == 200 and r.get_json()["summary"]["store_acc"] == 1.0
+
+
 def test_healthz():
     client = deflectly_app.app.test_client()
     r = client.get("/api/healthz")
