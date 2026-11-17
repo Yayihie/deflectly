@@ -142,6 +142,10 @@ def init_db():
         conn.execute("ALTER TABLE sessions ADD COLUMN tickets TEXT")
     if "reviewed" not in cols:
         conn.execute("ALTER TABLE sessions ADD COLUMN reviewed INTEGER DEFAULT 0")
+    if "model_ver" not in cols:
+        # bumped on every train/retrain so a worker holding a cached model knows
+        # its copy is stale and must reload from <sid>.pkl
+        conn.execute("ALTER TABLE sessions ADD COLUMN model_ver INTEGER DEFAULT 0")
     conn.commit()
     conn.close()
 
@@ -171,17 +175,21 @@ def state(sid):
     sees the write worker A made, so /api/train would reject an approved set.
     """
     st = STATE.setdefault(sid, {"store_model": None})
-    tickets, reviewed = [], False
+    tickets, reviewed, model_ver = [], False, 0
     try:
-        row = db().execute("SELECT tickets, reviewed FROM sessions WHERE id=?", (sid,)).fetchone()
+        row = db().execute(
+            "SELECT tickets, reviewed, model_ver FROM sessions WHERE id=?", (sid,)
+        ).fetchone()
         if row is not None:
             if row["tickets"]:
                 tickets = [(q, a) for q, a in json.loads(row["tickets"])]
             reviewed = bool(row["reviewed"])
+            model_ver = row["model_ver"] or 0
     except Exception as exc:  # a failed read must be visible, not silently empty
         app.logger.error("state read failed for %s: %r", sid, exc)
     st["tickets"] = tickets
     st["reviewed"] = reviewed
+    st["model_ver"] = model_ver
     return st
 
 
@@ -274,26 +282,48 @@ def has_pii(pairs):
 
 
 def load_store_model(sid, st=None):
-    """Return this session's trained model, loading it from disk if this worker
-    doesn't hold it in memory.
+    """Return this session's trained model, reloading it when this worker's copy is stale.
 
-    With multiple gunicorn workers, training happens in one process. Any later
-    request (page or API) may land on a worker with an empty cache, so every
-    reader must be able to rebuild the model from <sid>.pkl.
+    With multiple gunicorn workers, training/retraining happens in one process. Every
+    other worker holds either no model or an out-of-date one, so two things are checked
+    on each call: the model version recorded in SQLite (bumped on every train) versus
+    the version this worker loaded. Without the version check a correction made on one
+    worker was served stale by the others — the model appeared not to learn.
     """
     st = st if st is not None else state(sid)
-    model = st.get("store_model")
-    if model is not None:
-        return model
+    ver = st.get("model_ver", 0)
+    cached = st.get("store_model")
+    if cached is not None and st.get("store_model_ver") == ver:
+        return cached
     pkl = MODEL_DIR / f"{sid}.pkl"
     if pkl.exists():
         try:
             model = Responder.load(pkl)
             st["store_model"] = model
+            st["store_model_ver"] = ver
             return model
         except Exception as exc:
             app.logger.error("model load failed for %s: %r", sid, exc)
     return None
+
+
+def publish_model(sid, st, model):
+    """Persist a freshly trained model and bump the version every worker can see."""
+    st["store_model"] = model
+    try:
+        model.save(MODEL_DIR / f"{sid}.pkl")
+        prune_models()
+    except Exception as exc:
+        app.logger.error("model save failed for %s: %r", sid, exc)
+        return
+    try:
+        db().execute("UPDATE sessions SET model_ver = coalesce(model_ver, 0) + 1 WHERE id=?", (sid,))
+        db().commit()
+        row = db().execute("SELECT model_ver FROM sessions WHERE id=?", (sid,)).fetchone()
+        st["model_ver"] = (row["model_ver"] if row else 0) or 0
+        st["store_model_ver"] = st["model_ver"]
+    except Exception as exc:
+        app.logger.error("model version bump failed for %s: %r", sid, exc)
 
 
 def prune_models(keep=200):
@@ -469,12 +499,8 @@ def api_train():
         yield f"data: {json.dumps({'line': 'Building channel 3/3: character 3-5gram fuzzy matcher (typos, phrasing)'})}\n\n"
         yield f"data: {json.dumps({'line': 'Fusing channels with learned score weights'})}\n\n"
         st["store_model"] = m
-        # persist trained model to disk so any worker (or a restart) can reload it
-        try:
-            m.save(MODEL_DIR / f"{sid}.pkl")
-            prune_models()
-        except Exception as exc:
-            app.logger.error("model save failed for %s: %r", sid, exc)
+        # persist + version-bump so every worker picks up the new model
+        publish_model(sid, st, m)
         dt = time.time() - t0
         vocab = sum(len(getattr(v, "vocabulary_", {})) for v in (m._wq_vec, m._wa_vec, m._ch_vec))
         yield f"data: {json.dumps({'line': f'Indexing {vocab:,} features across {len(qs)} tickets'})}\n\n"
@@ -634,13 +660,8 @@ def api_feedback():
         qs = [q for q, a in st["tickets"]]
         ans = [a for q, a in st["tickets"]]
         st["store_model"] = Responder("store", qs, ans)
-        try:
-            st["store_model"].save(MODEL_DIR / f"{sid}.pkl")
-            prune_models()
-            retrained = 1
-        except Exception as exc:
-            app.logger.error("retrain save failed for %s: %r", sid, exc)
-            retrained = 0
+        publish_model(sid, st, st["store_model"])
+        retrained = 1
         # immediate proof the correction took
         answer, score, _ = st["store_model"].predict(question)
 

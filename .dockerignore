@@ -1,0 +1,17 @@
+# Keep local state and build artifacts out of the image build context.
+# app/models/*.pkl is ~14 MB of per-session model pickles and demo.db is local
+# data (including captured emails) — neither belongs in an image or an upload.
+.git
+.github
+__pycache__/
+*.pyc
+*.pkl
+app/models/
+demo.db
+*.db
+.session_key
+.venv/
+venv/
+.DS_Store
+.pytest_cache/
+.coverage

@@ -212,6 +212,50 @@ def test_compare_page_reloads_model_on_other_worker():
     assert r.status_code == 200 and r.get_json()["summary"]["store_acc"] == 1.0
 
 
+def test_correction_visible_across_workers():
+    """Regression: after a correction on worker B, worker A must not serve its stale model.
+
+    Caught by scripts/smoke.py against the live 2-worker deploy: /api/feedback reported
+    retrained=true, yet the next /api/predict returned the old answer with an unchanged
+    score, because worker A still had the pre-correction model in its cache.
+    """
+    client = deflectly_app.app.test_client()
+    original = deflectly_app.STATE
+
+    def train_current():
+        client.post("/api/sample")
+        pairs = [{"question": q, "answer": a} for q, a in deflectly_app.SAMPLE_TICKETS]
+        client.post("/api/review", json={"pairs": pairs})
+        client.post("/api/train").get_data(as_text=True)
+
+    q = "do you offer a nonprofit discount?"
+    correction = "Yes, nonprofits get 30% off any plan."
+    try:
+        deflectly_app.STATE = cache_a = {}
+        train_current()
+
+        # worker A answers once, caching the model
+        r = client.post("/api/predict", json={"question": q})
+        assert r.status_code == 200
+        stale_answer = r.get_json()["answer"]
+        assert stale_answer != correction
+
+        # worker B receives the correction and retrains
+        deflectly_app.STATE = cache_b = {}
+        r = client.post("/api/feedback", json={"question": q, "verdict": "down",
+                                               "corrected_answer": correction})
+        assert r.status_code == 200 and r.get_json()["retrained"] is True
+
+        # worker A must not answer with its pre-correction model
+        deflectly_app.STATE = cache_a
+        r = client.post("/api/predict", json={"question": q})
+        assert r.status_code == 200
+        assert r.get_json()["answer"].strip() == correction, (
+            f"worker served a stale model: {r.get_json()['answer'][:80]}")
+    finally:
+        deflectly_app.STATE = original
+
+
 def test_healthz():
     client = deflectly_app.app.test_client()
     r = client.get("/api/healthz")

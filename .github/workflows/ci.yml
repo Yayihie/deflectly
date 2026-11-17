@@ -1,0 +1,50 @@
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt pytest
+      - name: Run tests
+        run: pytest -q
+
+  # Prove the exact production entrypoint boots, serves, and trains — not just that
+  # unit tests pass. Catches worker/state regressions the test suite can't see.
+  gunicorn-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: Boot two workers and exercise the full flow
+        run: |
+          PORT=8451 gunicorn app.app:app --bind 0.0.0.0:8451 --workers 2 --timeout 120 &
+          for i in $(seq 1 30); do
+            curl -sf http://127.0.0.1:8451/api/healthz && break || sleep 1
+          done
+          curl -sf http://127.0.0.1:8451/api/healthz
+          python3 scripts/smoke.py http://127.0.0.1:8451
