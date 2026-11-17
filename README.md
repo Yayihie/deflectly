@@ -5,7 +5,7 @@ per-answer cost.**
 
 [![tests](https://github.com/Yayihie/deflectly/actions/workflows/ci.yml/badge.svg)](https://github.com/Yayihie/deflectly/actions/workflows/ci.yml)
 [![license: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
-[![python](https://img.shields.io/badge/python-3.11%20%7C%203.12%20%7C%203.13-blue.svg)](https://www.python.org/)
+[![python](https://img.shields.io/badge/python-3.9%20%E2%80%93%203.13-blue.svg)](https://www.python.org/)
 
 **[Live demo](https://deflectly-production.up.railway.app)** — paste tickets, train, compare, correct it, embed the widget.
 
@@ -73,6 +73,39 @@ over HTTP against any instance, including the live deployment:
 python3 scripts/smoke.py https://deflectly-production.up.railway.app
 ```
 
+## Use it on your own tickets (no server)
+
+The CLI drives the same model with no Flask, no browser and no API key. Point it at a
+CSV/TSV/JSON export from your helpdesk or a JSONL of `{"question": ..., "answer": ...}`:
+
+```sh
+pip install -e .                 # gives you the `deflectly` command
+deflectly train zendesk_export.csv
+deflectly ask "how do I rotate an API key?"
+deflectly teach "do you offer nonprofit pricing?" "Yes - nonprofits get 30% off."
+deflectly stats
+```
+
+```
+trained on 10 pairs from csv (question=Ticket Subject, answer=Resolution Comment) in 0.010s
+  dropped 1 too-short, 2 with PII (review and re-train with --keep-pii to include)
+
+$ deflectly ask "can I get my data out as csv?"
+A: Yes. Settings, Export, and you will get everything as CSV within an hour.
+   confidence 50%
+
+$ deflectly teach "do you offer nonprofit pricing?" "Yes - nonprofits get 30% off every plan."
+taught in 0.007s on 11 pairs
+  before (41%): Yes, 14 days, no card required. Start one from the pricing page.
+  after  (84%): Yes - nonprofits get 30% off every plan.
+```
+
+Column names are detected from the header (`subject`/`title`/`question`, and
+`resolution`/`reply`/`answer`/`comment`/`body`), pairs shorter than 8 characters are dropped, and
+**pairs containing emails or phone numbers are dropped by default** so customer PII does not land in
+your model — pass `--keep-pii` if you have already anonymised them. Run it without installing via
+`python3 scripts/deflectly_cli.py`. `deflectly demo` runs the built-in sample corpus offline.
+
 ## API
 
 | Endpoint | Purpose |
@@ -102,9 +135,11 @@ app/model.py               three-channel TF-IDF responder (+ save/load)
 app/data/sample_data.py    56-ticket sample corpus, 5 held-out questions, baseline KB
 app/static/widget.js       embeddable widget with the feedback loop
 app/templates/             landing, demo steps, review, teach, widget
+scripts/deflectly_cli.py   `deflectly train|ask|teach|stats|demo` — the no-server path
 scripts/smoke.py           HTTP end-to-end check (used by CI and after deploys)
 scripts/benchmark.py       reproduces the table above, offline
-tests/                     13 tests
+pyproject.toml             installable: `pip install -e .` gives the `deflectly` command
+tests/                     19 tests (app, worker-safety, CLI)
 ```
 
 ## Deploy
@@ -138,7 +173,7 @@ own stale copy. Four tests exist purely to pin that down:
 
 - Retrieval, not a fine-tuned model: fast, free, grounded, and it can't hallucinate a policy — but it plateaus on paraphrase-heavy corpora. Embeddings or a cross-encoder reranker are the natural next step, and the eval harness exists to show whether a change actually wins.
 - SQLite and `app/models/*.pkl` are container-local; on Railway/Render that disk is ephemeral. Attach a volume or move to Postgres before carrying real customer data. Model files are pruned to the newest 200.
-- `POST /api/import` is a skeleton, not a real helpdesk sync.
+- `POST /api/import` is a skeleton, not a real helpdesk sync. The path that does work today is an export file plus the CLI: `deflectly train <export.csv>`, which auto-detects question/answer columns for Intercom-, Zendesk- and Help Scout-style exports and drops rows containing emails or phone numbers unless you pass `--keep-pii`.
 - Checkout is demo-grade: it records intent, or creates a Stripe test-mode session when a key is set.
 - No auth or per-tenant isolation — a single-session demo, not a multi-tenant service.
 

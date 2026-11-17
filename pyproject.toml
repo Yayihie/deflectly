@@ -1,0 +1,40 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "deflectly"
+version = "0.1.0"
+description = "Support AI trained on your own support tickets. No LLM, no API key, no per-answer cost."
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+authors = [{ name = "Yayihie" }]
+keywords = ["customer-support", "helpdesk", "retrieval", "tfidf", "no-llm"]
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.9",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "License :: OSI Approved :: MIT License",
+  "Topic :: Office/Business",
+]
+dependencies = ["scikit-learn>=1.3", "flask>=3.0"]
+
+[project.optional-dependencies]
+dev = ["pytest", "gunicorn>=21.2"]
+
+[project.urls]
+Homepage = "https://deflectly-production.up.railway.app"
+Repository = "https://github.com/Yayihie/deflectly"
+
+[project.scripts]
+deflectly = "deflectly_cli:main"
+
+[tool.setuptools]
+# The CLI lives next to the app it drives; keeping the existing app/ layout means the
+# Flask app, the tests and the CLI all read the same model.py — one source of truth.
+package-dir = { "" = "scripts" }
+py-modules = ["deflectly_cli"]
