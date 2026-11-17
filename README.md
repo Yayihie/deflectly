@@ -24,7 +24,9 @@ up a policy.
 
 The consequence is the point: **learning is a 30-millisecond index rebuild, not a fine-tuning run.** When
 an agent corrects an answer, the next customer gets the correction. That loop is the product, and the
-`/teach` step lets you watch it happen.
+`/teach` step lets you watch it happen:
+
+![Correcting one answer takes the same question from 43% to 84% confidence](app/static/demo-teach.gif)
 
 ## Try it
 
