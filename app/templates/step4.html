@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+{% set step = 4 %}
+{% block title %}Get Deflectly live{% endblock %}
+{% block body %}
+<p class="steps">Step 1 · Tickets → Step 2 · Train → Step 3 · Compare → <b>Step 4 of 4</b> — Go live</p>
+<h1>Put this on your product</h1>
+<p class="sub">Every plan includes nightly retraining from new support conversations, an eval report before each deploy, and one-click rollback.</p>
+
+<div class="row" style="align-items:stretch;">
+  <div class="price">
+    <h3>Starter</h3>
+    <div class="p">$49<span style="font-size:14px; color:#666;">/mo</span></div>
+    <ul>
+      <li>Up to 500 tickets/mo answered</li>
+      <li>Nightly model retrain</li>
+      <li>Email + chat widget</li>
+    </ul>
+    <button data-plan="starter">Choose Starter</button>
+  </div>
+  <div class="price hot">
+    <h3>Growth</h3>
+    <div class="p">$99<span style="font-size:14px; color:#666;">/mo</span></div>
+    <ul>
+      <li>Up to 2,500 tickets/mo</li>
+      <li>Nightly retrain + eval report</li>
+      <li>Intercom / Help Scout sync</li>
+      <li>Human handoff rules</li>
+    </ul>
+    <button data-plan="growth">Choose Growth</button>
+  </div>
+  <div class="price">
+    <h3>Scale</h3>
+    <div class="p">$199<span style="font-size:14px; color:#666;">/mo</span></div>
+    <ul>
+      <li>Unlimited tickets</li>
+      <li>Custom fine-tuned adapter (SFT)</li>
+      <li>Weekly eval + rollback</li>
+      <li>Priority support</li>
+    </ul>
+    <button data-plan="scale">Choose Scale</button>
+  </div>
+</div>
+
+<p class="note" id="msg" style="margin-top:18px;">Demo checkout — clicking a plan records your interest only. No payment is taken.</p>
+
+<script>
+document.querySelectorAll('button[data-plan]').forEach(b => {
+  b.onclick = async () => {
+    await fetch('/api/checkout', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({plan: b.dataset.plan})});
+    b.textContent = 'Interest recorded ✓';
+    b.disabled = true;
+    document.getElementById('msg').textContent = 'Thanks — we saved your interest in the ' + b.dataset.plan + ' plan. (Demo only: nothing was charged.)';
+  };
+});
+</script>
+{% endblock %}

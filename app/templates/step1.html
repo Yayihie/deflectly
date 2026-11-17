@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+{% set step = 1 %}
+{% block title %}Paste your tickets{% endblock %}
+{% block body %}
+<p class="steps"><b>Step 1 of 4</b> — Paste tickets → Train → Compare → Go live</p>
+<h1>Paste your support tickets</h1>
+<p class="sub">Your past support Q/A pairs teach the model your product. Paste them, upload a file, or try the built-in SaaS sample.</p>
+
+{% if count %}
+<div class="flash"><b>{{ count }}</b> ticket pairs loaded. <a href="/train">Continue to training →</a></div>
+{% endif %}
+
+<div class="panel">
+  <textarea id="ta" placeholder="Q: What is the API rate limit for Growth?&#10;A: Growth allows 2,000 API requests per minute per workspace.&#10;Q: Can I enforce SSO for my whole workspace?&#10;A: Yes. On Scale, you can enforce SSO so all members must log in through your identity provider.&#10;&#10;Also accepted: question&#9;answer (tab-separated), or question / answer on alternating lines."></textarea>
+  <div class="row" style="margin-top:14px; align-items:center;">
+    <div>
+      <button id="go">Use these tickets</button>
+      <button class="ghost" id="sample">Load sample SaaS (60 tickets)</button>
+      <label class="btn ghost" style="position:relative; overflow:hidden;">
+        Upload .txt / .tsv
+        <input type="file" id="file" accept=".txt,.tsv,.csv" style="position:absolute; inset:0; opacity:0; cursor:pointer;">
+      </label>
+    </div>
+    <div style="text-align:right;" class="note" id="status"></div>
+  </div>
+</div>
+
+<p class="note" style="margin-top:18px;">
+  Your pasted tickets train only <em>your</em> model, in this browser session. Nothing is shared with other workspaces.
+</p>
+
+<script>
+const status = document.getElementById('status');
+function show(msg) { status.textContent = msg; }
+async function post(url, body, isForm) {
+  const r = await fetch(url, isForm ? {method:'POST', body} : {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
+  return r.json();
+}
+document.getElementById('go').onclick = async () => {
+  const res = await post('/api/tickets', {tickets: document.getElementById('ta').value});
+  if (res.ok) { show(res.count + ' ticket pairs loaded'); location.href = '/review'; }
+  else show(res.error);
+};
+document.getElementById('sample').onclick = async () => {
+  const res = await post('/api/sample', {});
+  if (res.ok) { show(res.count + ' sample tickets loaded'); location.href = '/review'; }
+};
+document.getElementById('file').onchange = async (e) => {
+  const fd = new FormData();
+  fd.append('file', e.target.files[0]);
+  const res = await post('/api/upload', fd, true);
+  if (res.ok) { show(res.count + ' ticket pairs loaded'); location.href = '/review'; }
+  else show(res.error);
+};
+</script>
+{% endblock %}

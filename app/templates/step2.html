@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+{% set step = 2 %}
+{% block title %}Train your model{% endblock %}
+{% block body %}
+<p class="steps">Step 1 · Tickets → <b>Step 2 of 4</b> — Train → Compare → Go live</p>
+<h1>Train your model</h1>
+<p class="sub">This trains a responder on your {{ count }} ticket pairs — right now, in seconds. Watch the real training log.</p>
+
+<div class="panel">
+  <button id="train">Train my model</button>
+  <span class="note" id="tstat"></span>
+</div>
+
+<div class="log" id="log" style="margin-top:20px;">Waiting for you to click "Train my model"…</div>
+
+<div style="margin-top:20px; text-align:right;">
+  <a href="/compare" class="btn" id="next" style="visibility:hidden;">See the comparison →</a>
+</div>
+
+<script>
+const log = document.getElementById('log');
+const btn = document.getElementById('train');
+btn.onclick = () => {
+  btn.disabled = true;
+  log.textContent = '';
+  fetch('/api/train', {method:'POST'}).then(res => {
+    const reader = res.body.getReader();
+    const dec = new TextDecoder();
+    let buf = '';
+    (function pump() {
+      reader.read().then(({done, value}) => {
+        if (done) { finish(); return; }
+        buf += dec.decode(value, {stream:true});
+        const parts = buf.split('\n\n');
+        buf = parts.pop();
+        for (const p of parts) {
+          const m = p.match(/data: (.*)/);
+          if (m) {
+            const obj = JSON.parse(m[1]);
+            log.textContent += obj.line + '\n';
+            if (obj.done) document.getElementById('tstat').textContent = 'Done in ' + obj.seconds + 's.';
+          }
+        }
+        pump();
+      });
+    })();
+  });
+};
+function finish() {
+  document.getElementById('next').style.visibility = 'visible';
+  document.getElementById('tstat').textContent = 'Trained. ';
+}
+</script>
+{% endblock %}

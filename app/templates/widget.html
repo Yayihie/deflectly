@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% set step = 5 %}
+{% block title %}Embed the widget{% endblock %}
+{% block body %}
+<p class="steps">Step 1 · Tickets → Step 2 · Review → Step 3 · Train → Step 4 · Compare → <b>Step 5 of 5</b> — Go live</p>
+<h1>Embed the support widget</h1>
+<p class="sub">Paste this snippet on your SaaS site. It adds a chat bubble that answers visitors using your trained Deflectly model.</p>
+
+<div class="panel">
+  <div style="font-size:12px; color:var(--mut); margin-bottom:8px;">Copy this into your site's <code>&lt;head&gt;:</code></div>
+  <pre style="background:#f0f0ee; padding:12px; border-radius:5px; font-size:13px; overflow-x:auto;"><code>&lt;script defer src="{{ request.host_url }}static/widget.js"
+  data-endpoint="{{ request.host_url }}api/predict"
+  data-title="Support"
+  data-primary="#0a6e3c"&gt;&lt;/script&gt;</code></pre>
+  <div style="margin-top:14px; font-size:13px; color:var(--mut);">
+    The widget posts to <code>/api/predict</code> on your Deflectly instance, so it only works once you've trained a model (Step 3).
+  </div>
+</div>
+
+<div style="margin-top:24px; display:flex; gap:12px;">
+  <a href="/" class="btn ghost">← Back to dashboard</a>
+</div>
+{% endblock %}

@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+{% set step = 3 %}
+{% block title %}Baseline vs your model{% endblock %}
+{% block body %}
+<p class="steps">Step 1 · Tickets → Step 2 · Train → <b>Step 3 of 4</b> — Compare → Go live</p>
+<h1>Generic bot vs <em>your</em> model</h1>
+<p class="sub">Five unseen test questions your model never saw during training. Scores are computed live from held-out gold answers.</p>
+
+<div class="kpi" id="kpis" style="display:none;">
+  <div><div class="num" id="k-b-acc">–</div><div class="lbl">Generic bot · exact answer match</div></div>
+  <div><div class="num" id="k-s-acc">–</div><div class="lbl">Your model · exact answer match</div></div>
+  <div><div class="num" id="k-b-rouge">–</div><div class="lbl">Generic bot · answer overlap (ROUGE-L)</div></div>
+  <div><div class="num" id="k-s-rouge">–</div><div class="lbl">Your model · answer overlap (ROUGE-L)</div></div>
+</div>
+
+<div id="tables"></div>
+
+<div style="margin-top:24px; text-align:right;">
+  <a href="/pricing" class="btn" id="next" style="visibility:hidden;">Get this live on your product →</a>
+</div>
+
+<script>
+function cls(x) { return x >= 0.75 ? 'good' : (x >= 0.4 ? 'mid' : 'bad'); }
+fetch('/api/compare', {method:'POST'}).then(r => r.json()).then(d => {
+  if (!d.ok) { location.href = '/train'; return; }
+  const s = d.summary;
+  document.getElementById('kpis').style.display = 'flex';
+  const set = (id, v, pct) => { const e = document.getElementById(id); e.textContent = pct ? Math.round(v*100)+'%' : v.toFixed(2); e.className = 'num ' + cls(v); };
+  set('k-b-acc', s.baseline_acc, true); set('k-s-acc', s.store_acc, true);
+  set('k-b-rouge', s.baseline_rouge); set('k-s-rouge', s.store_rouge);
+
+  const tables = document.getElementById('tables');
+  d.rows.forEach((row, i) => {
+    const div = document.createElement('div');
+    div.className = 'panel';
+    div.style.marginBottom = '16px';
+    div.innerHTML =
+      '<p style="margin:0 0 10px;"><b>Q' + (i+1) + '.</b> ' + esc(row.q) + '</p>' +
+      '<table>' +
+      '<tr><th style="width:150px;"></th><th>Answer given</th><th style="width:90px;">Match</th><th style="width:110px;">Overlap</th></tr>' +
+      '<tr><td>Generic bot</td><td>' + esc(row.baseline.answer) + '</td>' +
+      '<td class="score ' + (row.baseline.match ? 'good' : 'bad') + '">' + (row.baseline.match ? 'correct' : 'wrong') + '</td>' +
+      '<td class="score ' + cls(row.baseline.rouge) + '">' + row.baseline.rouge.toFixed(2) + '</td></tr>' +
+      '<tr><td><b>Your model</b></td><td>' + esc(row.store.answer) + '</td>' +
+      '<td class="score ' + (row.store.match ? 'good' : 'bad') + '">' + (row.store.match ? 'correct' : 'wrong') + '</td>' +
+      '<td class="score ' + cls(row.store.rouge) + '">' + row.store.rouge.toFixed(2) + '</td></tr>' +
+      '</table>';
+    tables.appendChild(div);
+    if (i === d.rows.length - 1) document.getElementById('next').style.visibility = 'visible';
+  });
+});
+function esc(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+</script>
+{% endblock %}

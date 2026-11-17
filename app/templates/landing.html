@@ -1,0 +1,175 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Deflectly — support AI trained on your product</title>
+<style>
+  :root { --ink:#1a1a1a; --mut:#666; --line:#e2e2e0; --acc:#0a6e3c; --bg:#fafaf8; }
+  * { box-sizing:border-box; }
+  body { margin:0; font:16px/1.6 -apple-system, "Helvetica Neue", Arial, sans-serif; color:var(--ink); background:#fff; }
+  header { border-bottom:1px solid var(--line); padding:18px 24px; display:flex; justify-content:space-between; align-items:center; background:#fff; }
+  header .logo { font-weight:800; letter-spacing:-0.03em; font-size:20px; text-decoration:none; color:var(--ink); }
+  header .logo span { color:var(--acc); }
+  header nav a { margin-left:26px; color:var(--mut); text-decoration:none; font-size:14px; }
+  header nav a:hover { color:var(--ink); }
+  .section { padding:56px 24px; max-width:900px; margin:0 auto; }
+  .section.dark { background:var(--bg); }
+  h1 { font-size:40px; letter-spacing:-0.03em; line-height:1.15; margin:0 0 14px; }
+  h2 { font-size:26px; letter-spacing:-0.02em; margin:0 0 12px; }
+  p.lead { font-size:18px; color:var(--mut); margin:0 0 26px; line-height:1.7; }
+  .btn { display:inline-block; background:var(--acc); color:#fff; border:0; border-radius:6px; padding:12px 24px; font-size:15px; font-weight:700; text-decoration:none; cursor:pointer; }
+  .btn.ghost { background:#fff; color:var(--ink); border:1px solid var(--line); }
+  .btn:hover { opacity:0.9; }
+  .grid { display:flex; gap:16px; flex-wrap:wrap; }
+  .card { border:1px solid var(--line); background:#fff; border-radius:8px; padding:26px; flex:1; min-width:240px; }
+  .card h3 { margin:0 0 8px; font-size:18px; }
+  .card .price { font-size:32px; font-weight:800; letter-spacing:-0.02em; }
+  .card ul { padding-left:0; list-style:none; color:var(--mut); font-size:14px; line-height:1.9; }
+  .card ul li { margin:4px 0; }
+  table { width:100%; border-collapse:collapse; font-size:14px; margin-top:10px; }
+  th, td { text-align:left; padding:10px 12px; border-bottom:1px solid var(--line); }
+  th { color:var(--mut); font-size:11px; text-transform:uppercase; letter-spacing:.08em; font-weight:700; }
+  .tag { font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.1em; color:var(--acc); margin:0 0 8px; }
+  .note { font-size:13px; color:var(--mut); }
+  .two-col { display:flex; gap:24px; flex-wrap:wrap; }
+  .two-col > * { flex:1; min-width:260px; }
+  form.capture { display:flex; gap:8px; flex-wrap:wrap; margin-top:10px; }
+  form.capture input[type="email"] { flex:1; min-width:220px; padding:10px 14px; border:1px solid var(--line); border-radius:6px; font-size:14px; outline:none; }
+  form.capture input[type="email"]:focus { border-color:var(--acc); }
+  .mock { border:1px solid var(--line); background:#fff; border-radius:8px; padding:16px; margin-top:14px; font-size:13px; color:var(--mut); }
+</style>
+</head>
+<body>
+
+<header>
+  <a class="logo" href="/">Deflect<span>ly</span></a>
+  <nav>
+    <a href="/demo">Demo</a>
+    <a href="#pricing">Pricing</a>
+  </nav>
+</header>
+
+<section class="section">
+  <div class="grid" style="align-items:center;">
+    <div style="flex:1; min-width:280px;">
+      <p class="tag">Support AI for B2B SaaS</p>
+      <h1>Train a support bot on <em>your</em> product.</h1>
+      <p class="lead">Generic chatbots don't know your pricing, your SSO setup, or your API rate limits. Deflectly trains on your past support tickets in seconds, then beats a generic bot on your own product questions. Put it live on your site with one embed snippet.</p>
+      <div style="display:flex; gap:10px; margin-top:18px;">
+        <a href="/demo" class="btn">Start the demo</a>
+        <a href="#pricing" class="btn ghost">View pricing</a>
+      </div>
+    </div>
+    <div style="flex:1; min-width:280px;">
+      <div class="mock">
+        <strong>Demo preview</strong> — paste tickets → train → compare:<br>
+        Generic bot: 0/5 correct &nbsp;|&nbsp; Your model: 5/5 correct<br>
+        <span class="note">Add a real screenshot here (running demo at /demo).</span>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="section dark" id="problem">
+  <h2>The problem</h2>
+  <p class="lead">Your support inbox already contains the right answers — your agents wrote them hundreds of times. Generic bots can't answer "does the Growth plan include SAML?" or "what's the API rate limit?" because those answers live in your tickets, not in a public FAQ. You end up answering the same questions anyway.</p>
+  <div class="grid">
+    <div class="card">
+      <h3>Generic bots deflect badly</h3>
+      <p class="note">Out-of-the-box answers are vague. Store-specific questions get handed off or hallucinated.</p>
+    </div>
+    <div class="card">
+      <h3>Retraining is a project</h3>
+      <p class="note">Fine-tuning pipelines need an ML team. A SaaS founder will never run one.</p>
+    </div>
+    <div class="card">
+      <h3>Platform AI is generic</h3>
+      <p class="note">Intercom Fin and Zendesk AI don't know your product. Yours should.</p>
+    </div>
+  </div>
+</section>
+
+<section class="section">
+  <h2>Before / after</h2>
+  <p class="lead">Five unseen product questions, answered by a generic bot vs. a model trained on your own tickets. Real scores, not canned replies.</p>
+  <table>
+    <tr><th>Model</th><th>Exact answer match</th><th>Answer overlap (ROUGE-L)</th></tr>
+    <tr><td>Generic baseline bot</td><td>0/5 (0%)</td><td>0.074</td></tr>
+    <tr><td><strong>Your trained model</strong></td><td><strong>5/5 (100%)</strong></td><td><strong>0.83</strong></td></tr>
+  </table>
+  <p class="note">Verified on the Nimbus HQ sample (56 past tickets, 5 held-out questions). Training completes in ~0.07s.</p>
+</section>
+
+<section class="section dark" id="pricing">
+  <h2>Pricing</h2>
+  <p class="lead">One demo session, one decision. No "contact sales."</p>
+  <div class="grid">
+    <div class="card">
+      <h3>Starter</h3>
+      <div class="price">$49<span style="font-size:16px;font-weight:400;color:var(--mut);">/mo</span></div>
+      <ul>
+        <li>Up to 500 conversations/mo</li>
+        <li>Nightly model retrain</li>
+        <li>Email + chat widget</li>
+      </ul>
+      <a href="/demo" class="btn" style="width:100%; text-align:center;">Choose Starter</a>
+    </div>
+    <div class="card" style="border-color:var(--acc); border-width:2px;">
+      <h3 style="color:var(--acc);">Growth <span style="font-size:12px;font-weight:400;color:var(--mut);">most popular</span></h3>
+      <div class="price">$99<span style="font-size:16px;font-weight:400;color:var(--mut);">/mo</span></div>
+      <ul>
+        <li>Up to 2,500 conversations/mo</li>
+        <li>Nightly retrain + eval report</li>
+        <li>Intercom / Help Scout sync</li>
+        <li>Human handoff rules</li>
+      </ul>
+      <a href="/demo" class="btn" style="width:100%; text-align:center;">Choose Growth</a>
+    </div>
+    <div class="card">
+      <h3>Scale</h3>
+      <div class="price">$199<span style="font-size:16px;font-weight:400;color:var(--mut);">/mo</span></div>
+      <ul>
+        <li>Unlimited conversations</li>
+        <li>Custom fine-tuned adapter</li>
+        <li>Weekly eval + rollback</li>
+        <li>Priority support</li>
+      </ul>
+      <a href="/demo" class="btn" style="width:100%; text-align:center;">Choose Scale</a>
+    </div>
+  </div>
+</section>
+
+<section class="section">
+  <h2>Get early access</h2>
+  <p class="lead">We're onboarding the first 10 design partners. Train on your last 100 support tickets — free audit, no commitment.</p>
+  <form class="capture" id="emailForm">
+    <input type="email" name="email" placeholder="you@company.com" required>
+    <button class="btn" type="submit">Request access</button>
+  </form>
+  <p id="emailMsg" class="note" style="margin-top:8px;"></p>
+  <p class="note">We won't share your email. This is a waitlist — no charge.</p>
+</section>
+
+<footer style="border-top:1px solid var(--line); padding:30px 24px; color:var(--mut); font-size:13px; max-width:900px; margin:0 auto;">
+  Deflectly &middot; Support AI trained on your product &middot; <a href="/demo" style="color:var(--ink); text-decoration:none;">Start demo</a>
+</footer>
+
+<script>
+document.getElementById('emailForm').onsubmit = async (e) => {
+  e.preventDefault();
+  const fd = new FormData(e.target);
+  const res = await fetch('/api/capture-email', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({email: fd.get('email')}),
+  });
+  const d = await res.json();
+  const msg = document.getElementById('emailMsg');
+  if (d.ok) { msg.textContent = 'Thanks — you\'re on the list.'; e.target.reset(); }
+  else { msg.textContent = d.error || 'Something went wrong.'; }
+};
+</script>
+
+</body>
+</html>

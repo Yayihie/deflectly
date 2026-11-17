@@ -1,0 +1,75 @@
+{% extends "base.html" %}
+{% set step = 2 %}
+{% block title %}Review your tickets{% endblock %}
+{% block body %}
+<p class="steps"><b>Step 1 of 5</b> — Paste tickets → <b>Review</b> → Train → Compare → Go live</p>
+<h1>Review before training</h1>
+<p class="sub">Check each pair, fix anything wrong, and remove any that contain customer PII (emails, phone numbers). Only approved pairs train your model.</p>
+
+{% if has_pii %}
+<div class="flash" style="border-left-color:#a8720a;">
+  <b>⚠ PII detected.</b> Some pairs contain email addresses or phone numbers. Edit them out before training — customer data never goes into the model.
+</div>
+{% endif %}
+
+<div class="panel">
+  <form id="reviewForm">
+    {% for pair in pairs %}
+    <div style="border:1px solid var(--line); border-radius:5px; padding:14px; margin-bottom:12px; background:#fff;">
+      <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:8px;">
+        <span style="font-size:12px; text-transform:uppercase; letter-spacing:.05em; color:var(--mut); font-weight:600;">Pair {{ loop.index }}</span>
+        {% if pair.pii %}
+          <span style="font-size:11px; background:#fff4d6; color:#a8720a; padding:2px 8px; border-radius:3px;">PII: {{ pair.pii|join(', ') }}</span>
+        {% endif %}
+        <label style="font-size:13px; color:var(--mut); cursor:pointer;">
+          <input type="checkbox" name="remove" value="{{ pair.index }}" style="margin-right:6px;"> Remove
+        </label>
+      </div>
+      <div style="display:flex; gap:10px;">
+        <div style="flex:1;">
+          <div style="font-size:12px; color:var(--mut); margin-bottom:4px;">Question</div>
+          <textarea name="q-{{ pair.index }}" style="width:100%; min-height:54px; border:1px solid var(--line); border-radius:4px; padding:8px; font:13px/1.5 ui-monospace, Menlo, monospace;">{{ pair.question }}</textarea>
+        </div>
+        <div style="flex:1;">
+          <div style="font-size:12px; color:var(--mut); margin-bottom:4px;">Answer</div>
+          <textarea name="a-{{ pair.index }}" style="width:100%; min-height:54px; border:1px solid var(--line); border-radius:4px; padding:8px; font:13px/1.5 ui-monospace, Menlo, monospace;">{{ pair.answer }}</textarea>
+        </div>
+      </div>
+    </div>
+    {% endfor %}
+
+    <div style="margin-top:18px; display:flex; justify-content:space-between; align-items:center;">
+      <div class="note">{{ count }} pair{{ 's' if count != 1 else '' }} ready for review.</div>
+      <button id="approve" class="btn" style="background:var(--acc);">Approve all &amp; train →</button>
+    </div>
+  </form>
+</div>
+
+<p class="note" style="margin-top:18px;">
+  Removed or edited pairs won't be used in training. Nothing leaves this session.
+</p>
+
+<script>
+document.getElementById('approve').onclick = async (e) => {
+  e.preventDefault();
+  const form = document.getElementById('reviewForm');
+  const removed = new Set();
+  form.querySelectorAll('input[name="remove"]:checked').forEach(cb => removed.add(Number(cb.value)));
+  const pairs = [];
+  document.querySelectorAll('#reviewForm > div').forEach((el, i) => {
+    if (removed.has(i)) return;
+    const q = el.querySelector('[name^="q-"]').value;
+    const a = el.querySelector('[name^="a-"]').value;
+    if (q.trim() && a.trim()) pairs.push({question: q.trim(), answer: a.trim()});
+  });
+  const res = await fetch('/api/review', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({pairs}),
+  });
+  const d = await res.json();
+  if (!d.ok) { alert(d.error || 'Review failed'); return; }
+  location.href = '/train';
+};
+</script>
+{% endblock %}
